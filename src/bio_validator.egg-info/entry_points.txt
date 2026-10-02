@@ -1,0 +1,2 @@
+[console_scripts]
+bio-validate = bio_validator.cli:main

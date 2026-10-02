@@ -1,6 +1,11 @@
 from pathlib import Path
 import random, re
 from bio_validator.exceptions import FastaValidationError
+import urllib.error
+from Bio import Blast  # Requires Biopython
+from Bio.Blast import NCBIWWW, NCBIXML
+from bio_validator.exceptions import FastaValidationError, MarkerMismatchError
+import io  # Add this near your other imports at the top
 
 class FastaValidator:
     """Encapsulates the business logic for validating FASTA file integrity and contents."""
@@ -152,10 +157,75 @@ class FastaValidator:
         return records
            
 
-    def run_blast_check(self) -> bool:
-        """Subsamples sequences and queries NCBI to verify if it is COI."""
-        # Step 1: Subsample 10 sequences deterministically
-        # Step 2: Call NCBI via Biopython (with try/except handling)
-        # Step 3: Evaluate top hits
-        return True
+    def run_blast_check(self) -> None:
+        """Samples sequences, runs a remote BLAST query, and verifies they are COI.
+        
+        Raises:
+            MarkerMismatchError: If the sequences don't align with Cytochrome C Oxidase I.
+            RuntimeError: If a network or API communication error occurs.
+        """
+        # 1. Grab our 10 representative sequences from disk
+        sampled_records = self.subsample_sequences()
+        if not sampled_records:
+            raise FastaValidationError("Cannot run BLAST validation; no sequences found in file.")
 
+        # 2. Convert our list of dicts back into a single multi-FASTA string for the API call
+        # This keeps us down to exactly ONE network request instead of ten separate hits.
+        multi_fasta_query = ""
+        for record in sampled_records:
+            multi_fasta_query += f"{record['header']}\n{record['sequence']}\n"
+
+        print(f"📡 Sending {len(sampled_records)} sequences to NCBI BLAST (this can take a minute)...")
+
+        try:
+            # 1. Set the global module identification properties. This satisfies NCBI guidelines.
+            NCBIWWW.email = "lv70xo@gmail.com"
+            # 2. Execute the remote BLAST search safely using ONLY strict API parameters
+            result_handle = NCBIWWW.qblast(
+                program="blastn",
+                database="nt",
+                sequence=multi_fasta_query,
+            )
+            
+            # Read the XML response object from the network stream
+            blast_results_raw = result_handle.read()
+            result_handle.close()
+
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"Network connection to NCBI BLAST failed: {e}")
+
+            # Any other API or stream parsing failure
+            raise RuntimeError(f"An error occurred while communicating with NCBI: {e}")
+
+        # 4. Parse and evaluate the biological content
+        # Compile a regex to look for variations of COI / Cytochrome Oxidase Subunit 1
+        coi_keywords = re.compile(r"(coi|cox1|cytochrome\s+c\s+oxidase\s+subunit\s+1)", re.IGNORECASE)
+        
+        # FIX: Wrap the raw string directly in io.StringIO
+        blast_records = NCBIXML.parse(io.StringIO(blast_results_raw))
+        
+        confirmed_coi_count = 0
+        total_queries_evaluated = 0
+
+        for blast_record in blast_records:
+            total_queries_evaluated += 1
+            
+            # Defensive check: Did this sequence hit anything at all?
+            if not blast_record.alignments:
+                continue  # Dark matter sequence, or sequence too short to hit anything
+
+            # Snag the definition line of the #1 absolute top hit for this sequence
+            top_hit_title = blast_record.alignments[0].title # Added indexing protection [0]
+            
+            if coi_keywords.search(top_hit_title):
+                confirmed_coi_count += 1
+
+        # 5. Make an architectural decision based on the sample cross-section
+        # If less than 70% of hits match COI, reject the file as containing non-COI sequences.
+        if total_queries_evaluated == 0 or (confirmed_coi_count / total_queries_evaluated) < 0.7:
+            raise MarkerMismatchError(
+                f"Biological verification failed. Only {confirmed_coi_count}/{total_queries_evaluated} "
+                f"sampled sequences matched the COI marker database entries."
+            )
+
+        # Smooth exit implies success!
