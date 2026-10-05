@@ -12,3 +12,6 @@ class MarkerMismatchError(BioValidatorError):
     """Raised when the biological contents do not match the expected marker (e.g., not COI)."""
     pass
 
+class OtuMappingError(BioValidatorError):
+    """Raised when and OTU table structure is malformed or mismatches its accompanying FASTA file."""
+    pass
