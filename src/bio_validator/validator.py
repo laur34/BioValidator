@@ -1,11 +1,10 @@
 from pathlib import Path
 import random, re
-from bio_validator.exceptions import FastaValidationError
 import urllib.error
 from Bio import Blast  # Requires Biopython
 from Bio.Blast import NCBIWWW, NCBIXML
-from bio_validator.exceptions import FastaValidationError, MarkerMismatchError
-import io  # Add this near your other imports at the top
+from bio_validator.exceptions import FastaValidationError, MarkerMismatchError, OtuMappingError
+import io
 
 class FastaValidator:
     """Encapsulates the business logic for validating FASTA file integrity and contents."""
@@ -227,5 +226,99 @@ class FastaValidator:
                 f"Biological verification failed. Only {confirmed_coi_count}/{total_queries_evaluated} "
                 f"sampled sequences matched the COI marker database entries."
             )
-
         # Smooth exit implies success!
+
+    def _extract_all_fasta_headers(self) -> set[str]:
+        """Internal helper to pull just the clean header IDs from the FASTA file.
+        
+        Extracts the identifier exactly as a clean string object to ensure perfect 
+        set intersections with metadata data structures.
+        """
+        self.validate_file_exists()
+        headers = set()
+        with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if line.startswith(">"):
+                    # Fix: Strip the '>' and whitespace, but keep it as a PURE string.
+                    # Do NOT use .split(), which converts it into an unhashable list object!
+                    header_id = line[1:].strip()
+                    if header_id:
+                        headers.add(header_id)
+        return headers
+
+    def validate_otu_table(self, otu_table_path: str | Path) -> None:
+        """Cross-validates a tab-separated (.tsv) or comma-separated (.csv) OTU table 
+        against the sequence IDs defined in the FASTA file.
+        
+        Raises:
+            OtuMappingError: If headers mismatch or file structure is broken.
+        """
+        otu_path = Path(otu_table_path)
+        if not otu_path.exists():
+            raise FileNotFoundError(f"OTU table file missing: {otu_path}")
+
+        # 1. Grab our truth set of IDs from the FASTA file
+        fasta_headers = self._extract_all_fasta_headers()
+        if not fasta_headers:
+            raise FastaValidationError("The companion FASTA file contains zero valid sequence records.")
+
+        # 2. Determine delimiter based on file extension (.tsv vs .csv)
+        delimiter = "\t" if otu_path.suffix.lower() == ".tsv" else ","
+
+        otu_ids = set()
+        
+        # 3. Stream the OTU table line-by-line
+        with open(otu_path, "r", encoding="utf-8", errors="ignore") as f:
+            # Read the header line first to check table structure
+            header_line = f.readline().strip()
+            if not header_line:
+                raise OtuMappingError("The provided OTU table file is completely empty.")
+
+            # Identify which column contains the OTU/Sequence IDs
+            # Production tables typically start with '#OTU ID', 'OTU_ID', 'ID', or 'label'
+            columns = header_line.split(delimiter)
+            id_column_index = 0 # Default to the first column if unlabelled
+
+            for idx, col in enumerate(columns):
+                if any(kw in col.upper() for kw in ["OTU", "ID", "SEQUENCE", "#"]):
+                    id_column_index = idx
+                    break
+
+            # Process the body of the matrix line-by-line
+            for line_idx, line in enumerate(f, start=2):
+                cleaned_line = line.strip()
+                if not cleaned_line:
+                    continue  # Skip trailing empty lines gracefully
+
+                row_data = cleaned_line.split(delimiter)
+                
+                # Defensive formatting verification
+                if len(row_data) <= id_column_index:
+                    raise OtuMappingError(f"Malformed row on line {line_idx} of OTU table. Row lacks required columns.")
+
+                # Extract the identifier from the target data matrix index
+                otu_id = row_data[id_column_index].strip()
+                if otu_id:
+                    otu_ids.add(otu_id)
+
+        # 4. Perform Symmetric Set Comparisons (The Validation Checks)
+        # Check A: Are there IDs inside the FASTA file missing from the OTU table?
+        missing_in_otu = fasta_headers - otu_ids
+        if missing_in_otu:
+            sample_missing = list(missing_in_otu)[:3]
+            raise OtuMappingError(
+                f"Data mismatch: {len(missing_in_otu)} sequences from your FASTA file are completely "
+                f"missing from your OTU table matrix! Sample missing IDs: {sample_missing}"
+            )
+
+        # Check B: Are there IDs inside the OTU table that lack matching sequences in the FASTA file?
+        missing_in_fasta = otu_ids - fasta_headers
+        if missing_in_fasta:
+            sample_missing = list(missing_in_fasta)[:3]
+            raise OtuMappingError(
+                f"Data mismatch: Your OTU table references {len(missing_in_fasta)} identifiers that "
+                f"do not exist in your companion FASTA file! Sample unknown IDs: {sample_missing}"
+            )
+
+        # Smooth execution finish implies total alignment perfection!
+
