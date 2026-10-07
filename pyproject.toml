@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 name = "bio_validator"
 version = "0.1.0"
 authors = [
-    { name = "Your Name", email = "your.email@professionals.com" }
+    { name = "Laura Hardulak", email = "your.email@professionals.com" }
 ]
 description = "A production-grade CLI tool to validate FASTA file structures and markers."
 readme = "README.md"

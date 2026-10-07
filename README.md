@@ -1,11 +1,60 @@
 # BioValidator
-This is a command-line program to validate whether a file is a valid fasta file, and if it is, whether its sequences are COI, by performing a small test BLAST.
+
+A production-grade, memory-efficient CLI tool to validate FASTA file structures, verify if it's COI by performing an NCBI test BLAST of a subsample of sequences, and check consistency of fasta headers with an OTU table.
 
 ## Installation
-To install it (UNIX/LINUX), simply cd into the BioValidator directory once you have downloaded it, and run  ```pip install -e . ```
 
-## Usage
-```bio-validate [-h] [--sample-size SAMPLE_SIZE] fasta_file ```
+To install it locally in **editable development mode** (allowing you to tweak code logic dynamically without re-installing):
 
-Default sample size is 10. It is the number of sequences to sample from the fasta file, for a test BLAST.
-You must supply a fasta file, as the input.
+1. Clone or navigate to the project root directory:
+   ```bash
+   cd /path/to/BioValidator
+   ```
+
+2. Install the package using `pip`:
+   ```bash
+   pip install -e .
+   ```
+
+## Pipeline Features & Architecture
+
+The validation pipeline performs three sequential validation phases using a memory-optimized streaming approach:
+
+1. **Structural Verification:** Streams the input file line-by-line (safely validating files >50GB without system memory spikes). It enforces strict FASTA header alignment rules, strips quality indicators to catch unintended FASTQ submissions, and checks characters against clean IUPAC code parameters (wildcards are forbidden).
+2. **Biological Marker Alignment:** Pulls a subsample (default size of 10) of sequence strings spaced deterministically across your entire dataset. It groups them into one batched remote NCBI BLAST network request payload to protect against server rate limits, and uses keyword threshold filtering to verify if the file likely contains COI marker fragments.
+3. **OTU Cross-Referencing (Optional):** Performs an O(N) symmetric set comparison checking your FASTA headers against an accompanying OTU table to guarantee that sequence IDs between files align.
+
+
+## Usage Examples
+
+Once installed, the global application tool is accessible natively from any terminal window using the `bio-validate` command name wrapper.
+
+### 1. Basic FASTA Validation
+Validates structural formatting and runs a 10-sequence remote BLAST check:
+```bash
+bio-validate /path/to/my_sequences.fasta
+```
+
+### 2. Adjusting the Biological Sampling Quota
+Increases or decreases the number of internal cross-section reads dispatched to NCBI:
+```bash
+bio-validate --sample-size 5 /path/to/my_sequences.fasta
+```
+
+### 3. Integrated FASTA & OTU Matrix Cross-Validation
+Validates the structural and biological markers, then ensures the identifiers match your OTU table perfectly. By default, the matrix delimiter matches tab-separated formats (`.tsv`):
+```bash
+bio-validate --otu-table /path/to/otu_table.tsv /path/to/my_sequences.fasta
+```
+
+## Running Automated Unit Tests 🧪
+
+Automated testing layouts are built using the `pytest` testing ecosystem framework. To verify your core business rules and mock database network endpoints locally without making live calls to the web:
+
+```bash
+# Install pytest framework dependencies
+pip install pytest
+
+# Run the test execution runner suite
+pytest
+```
