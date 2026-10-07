@@ -263,7 +263,7 @@ class FastaValidator:
             raise FastaValidationError("The companion FASTA file contains zero valid sequence records.")
 
         # 2. Determine delimiter based on file extension (.tsv vs .csv)
-        delimiter = "\t" if otu_path.suffix.lower() == ".tsv" else ","
+        delimiter = "," if otu_path.suffix.lower() == ".csv" else "\t"
 
         otu_ids = set()
         
