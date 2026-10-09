@@ -4,17 +4,19 @@ A production-grade, memory-efficient CLI tool to validate FASTA file structures,
 
 ## Installation
 
-To install it locally in **editable development mode** (allowing you to tweak code logic dynamically without re-installing):
+After cloning or downloading the repository, it is simple to install.
 
-1. Clone or navigate to the project root directory:
-   ```bash
-   cd /path/to/BioValidator
-   ```
+1. Navigate to its root directory:
+```bash
+cd /path/to/Biovalidator
+```
 
-2. Install the package using `pip`:
-   ```bash
-   pip install -e .
-   ```
+2. Install using `pip`:
+```bash
+pip install -e .
+```
+
+The optional "-e" switch is for **editable development mode** (allowing you to tweak code logic dynamically without re-installing).
 
 ## Pipeline Features & Architecture
 
@@ -49,7 +51,9 @@ bio-validate --otu-table /path/to/otu_table.tsv /path/to/my_sequences.fasta
 
 ## Running Automated Unit Tests 🧪
 
-Automated testing layouts are built using the `pytest` testing ecosystem framework. To verify your core business rules and mock database network endpoints locally without making live calls to the web:
+Automated testing layouts are built using the `pytest` testing ecosystem framework.
+Pytest will automatically run all the tests in the test folder. test_validator.py uses Mocking to circumvent the need to connect to NCBI's liver servers for the BLAST.
+To install and use pytest:
 
 ```bash
 # Install pytest framework dependencies
