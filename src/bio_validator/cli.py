@@ -23,7 +23,16 @@ def main() -> None:
         default=10,
         help="Number of sequences to subsample for BLAST validation (default: 10)."
     )
-    
+
+    # Choice of marker gene
+    parser.add_argument(
+        "--marker",
+        type=str,
+        choices=["COI", "ITS", "16S"],
+        default="COI",
+        help="The expected biological marker gene in the FASTA file (default: COI)."
+    )
+
     # New Optional OTU table validation argument
     parser.add_argument(
         "--otu-table", 
@@ -35,7 +44,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"🧬 Initializing validation pipeline for: {args.fasta_file}")
-    validator = FastaValidator(file_path=args.fasta_file, sample_size=args.sample_size)
+    validator = FastaValidator(file_path=args.fasta_file, sample_size=args.sample_size, marker=args.marker)
     
     try:
         # Step 1: Run the structural integrity validation
@@ -55,7 +64,7 @@ def main() -> None:
         print("🎉 Pipeline Complete: All submitted datasets are fully validated and aligned!")
         sys.exit(0)
 
-    # 🛡️ Clean, Granular Defensive Catch Blocks
+    # Clean, Granular Defensive Catch Blocks
     except FileNotFoundError as e:
         print(f"❌ Input Error: {e}")
         sys.exit(2)

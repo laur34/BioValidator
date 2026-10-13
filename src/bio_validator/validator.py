@@ -9,9 +9,10 @@ import io
 class FastaValidator:
     """Encapsulates the business logic for validating FASTA file integrity and contents."""
     
-    def __init__(self, file_path: str | Path, sample_size: int = 10):
+    def __init__(self, file_path: str | Path, sample_size: int = 10, marker: str="COI"):
         self.file_path = Path(file_path)
         self.sample_size = sample_size
+        self.marker = marker.upper()
 
     def validate_file_exists(self) -> None:
         """Defensive check before any parsing happens."""
@@ -196,14 +197,29 @@ class FastaValidator:
             # Any other API or stream parsing failure
             raise RuntimeError(f"An error occurred while communicating with NCBI: {e}")
 
-        # 4. Parse and evaluate the biological content
-        # Compile a regex to look for variations of COI / Cytochrome Oxidase Subunit 1
-        coi_keywords = re.compile(r"(coi|cox1|cytochrome\s+c\s+oxidase\s+subunit\s+1|mitochondrion|mitochondrial|mtdna)", re.IGNORECASE)
+        # 3. Define Marker-Specific Regular Expressions
+        # Create regex's
+        MARKER_PATTERNS = {
+            "COI": re.compile(
+                r"(coi|cox1|cytochrome\s+c\s+oxidase\s+subunit\s+1|mitochondrion|mitochondrial|mtdna)", 
+                re.IGNORECASE
+            ),
+            "ITS": re.compile(
+                r"(its|internal\s+transcribed\s+spacer|ribosomal\s+rna|rrna|chloroplast|plastid)", 
+                re.IGNORECASE
+            ),
+            "16S": re.compile(
+                r"(16s|ribosomal\s+rna|rrna|bacteri[au]m)", 
+                re.IGNORECASE
+            )
+        }
         
-        # FIX: Wrap the raw string directly in io.StringIO
+        # 4. Select the active pattern based on what the user requested
+        active_keywords = MARKER_PATTERNS[self.marker]
+
         blast_records = NCBIXML.parse(io.StringIO(blast_results_raw))
         
-        confirmed_coi_count = 0
+        confirmed_match_count = 0
         total_queries_evaluated = 0
         debug_log_lines = [] #Internal collection to log top hit results
 
@@ -219,24 +235,23 @@ class FastaValidator:
             top_hit_title = blast_record.alignments[0].title
 
             # Track match status internally
-            is_match = bool(coi_keywords.search(top_hit_title))
+            is_match = bool(active_keywords.search(top_hit_title))
             status_symbol = "✅" if is_match else "❌"
             debug_log_lines.append(f"    Query  {idx}:  {status_symbol}Top Hit Title -> {top_hit_title}")
             
             if is_match:
-                confirmed_coi_count += 1
+                confirmed_match_count += 1
 
-        # 5. Make an architectural decision based on the sample cross-section
-        # If less than 70% of hits match COI, reject the file as containing non-COI sequences.
-        if total_queries_evaluated == 0 or (confirmed_coi_count / total_queries_evaluated) < 0.7:
+        # If less than 70% of hits match marker gene, reject the file as containing incorrect sequences.
+        if total_queries_evaluated == 0 or (confirmed_match_count / total_queries_evaluated) < 0.7:
             # Print the internal evaluation details right before throwing the error
             print("\n[INTERNAL DEBUG LOG] Top BLAST Hits Evaluated:")
             for log_line in debug_log_lines:
                 print(log_line)
             print("")
             raise MarkerMismatchError(
-                f"Biological verification failed. Only {confirmed_coi_count}/{total_queries_evaluated} "
-                f"sampled sequences matched the COI/mitochondrial marker database entries."
+                f"Biological verification failed. Only {confirmed_match_count}/{total_queries_evaluated} "
+                f"sampled sequences matched the target {self.marker} database entries."
             )
         # Smooth exit implies success!
 
