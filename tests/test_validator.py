@@ -2,9 +2,9 @@
 import pytest
 import io
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from bio_validator.validator import FastaValidator
-from bio_validator.exceptions import FastaValidationError
+from bio_validator.exceptions import FastaValidationError, MarkerMismatchError
 
 # =====================================================================
 # 1. STRUCTURAL INTEGRITY TESTS
@@ -77,5 +77,63 @@ def test_blast_check_passes_with_coi_hits(mock_qblast, mock_parse, tmp_path):
     assert validator.run_blast_check() is None
     
     # Ensure our internal modules were appropriately called by the manager method
+    mock_qblast.assert_called_once()
+    mock_parse.assert_called_once()
+
+
+# =====================================================================
+# 3. MULTI-MARKER PARAMETERIZED TESTS
+# =====================================================================
+
+@pytest.mark.parametrize(
+    "selected_marker, mock_top_hit_title, should_pass",
+    [
+        # Scenario A: COI validation passes with clear mitochondrial taxonomy matching
+        ("COI", "Homo sapiens cytochrome c oxidase subunit 1 (COI) mRNA", True),
+        # Scenario B: 16S validation passes with bacterial ribosomal indicators
+        ("16S", "Uncultured bacterium clone 16S ribosomal RNA gene, partial sequence", True),
+        # Scenario C: ITS validation passes with fungal spacer indicators
+        ("ITS", "Fusarium oxysporum internal transcribed spacer 1, partial sequence", True),
+        # Scenario D: Cross-marker failure (Passing 16S data when expecting COI)
+        ("COI", "Escherichia coli 16S ribosomal RNA gene", False),
+        # Scenario E: Random non-target gene mismatch failure
+        ("ITS", "Arabidopsis thaliana alcohol dehydrogenase mRNA, complete cds", False),
+    ]
+)
+@patch("bio_validator.validator.NCBIXML.parse")
+@patch("bio_validator.validator.NCBIWWW.qblast")
+def test_multi_marker_validation_logic(
+    mock_qblast, mock_parse, tmp_path, selected_marker, mock_top_hit_title, should_pass
+):
+    """Verifies that the validator accurately filters hits across all supported markers
+    and throws errors on cross-marker contaminants or wrong inputs.
+    """
+    # 1. Setup a clean dummy FASTA file to satisfy the local subsampler
+    fasta_file = tmp_path / "marker_test.fasta"
+    fasta_file.write_text(f">test_seq\nACTGATCGATCG\n")
+
+    # 2. Mock out raw text network streaming layer
+    mock_qblast.return_value = io.StringIO("fake_xml_payload")
+
+    # 3. Build fake record structures using the test case's top hit definition line
+    mock_record = MagicMock()
+    mock_alignment = MagicMock()
+    mock_alignment.title = mock_top_hit_title
+    mock_record.alignments = [mock_alignment]
+    mock_parse.return_value = [mock_record]
+
+    # 4. Instantiate engine using the unique parameter configurations
+    validator = FastaValidator(file_path=fasta_file, sample_size=1, marker=selected_marker)
+
+    # 5. Evaluate the execution flow defensively based on expected outcomes
+    if should_pass:
+        # If it's supposed to match, it should run to completion flawlessly (None)
+        assert validator.run_blast_check() is None
+    else:
+        # If it's a mismatch configuration, it must explicitly raise MarkerMismatchError
+        with pytest.raises(MarkerMismatchError):
+            validator.run_blast_check()
+
+    # Verify tracking assets were properly referenced by the orchestrator method
     mock_qblast.assert_called_once()
     mock_parse.assert_called_once()
